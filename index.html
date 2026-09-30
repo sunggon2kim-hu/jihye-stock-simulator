@@ -439,15 +439,25 @@ const getKey = () => store.get('ss_key','');
 $('#apiKey').value = getKey();
 $('#keyBtn').onclick = () => { $('#keyCard').classList.toggle('hidden'); if(!$('#keyCard').classList.contains('hidden')) window.scrollTo({top:0,behavior:'smooth'}); };
 $('#saveKey').onclick = () => { store.set('ss_key', $('#apiKey').value.trim()); $('#keyCard').classList.add('hidden'); msg('API 키를 저장했어요. 종목을 조회해 보세요! 🎉'); };
-if (!getKey()) $('#keyCard').classList.remove('hidden');
+// 붙여넣기만 해도 저장 (저장 버튼을 안 눌러도 유지)
+$('#apiKey').addEventListener('change', () => store.set('ss_key', $('#apiKey').value.trim()));
+$('#apiKey').addEventListener('keydown', e => { if (e.key==='Enter') $('#saveKey').click(); });
+
+// 서버 중계(/api)가 있으면 키 입력 없이 사용. 직접 입력한 키가 있으면 그 키가 우선.
+let PROXY = false;
+const proxyReady = fetch('api?function=STATUS').then(r => r.ok ? r.json() : null)
+  .then(d => { PROXY = !!(d && d.proxy && d.hasKey); }).catch(() => {})
+  .finally(() => { if (!getKey() && !PROXY) $('#keyCard').classList.remove('hidden'); });
 
 async function av(params, force){
+  await proxyReady;
   const key = getKey();
-  if (!key) throw new Error('NOKEY');
-  const qs = new URLSearchParams({...params, apikey:key}).toString();
-  const ck = 'ss_c_'+qs.replace(/apikey=[^&]*/,'');
+  if (!key && !PROXY) throw new Error('NOKEY');
+  const base = new URLSearchParams(params).toString();
+  const ck = 'ss_c_'+base;
   if (!force){ const c = store.get(ck,null); if (c && Date.now()-c.t < TTL) return c.d; }
-  const r = await fetch(AV+'?'+qs);
+  const url = key ? AV+'?'+base+'&apikey='+encodeURIComponent(key) : 'api?'+base+(force?'&force=1':'');
+  const r = await fetch(url);
   if (!r.ok) throw new Error('HTTP '+r.status);
   const d = await r.json();
   if (d['Error Message']) throw new Error('INVALID');
@@ -690,7 +700,8 @@ async function load(force){
   const raw = $('#ticker').value;
   if (!raw.trim()) return;
   $('#ticker').blur();
-  if (!getKey()) { $('#keyCard').classList.remove('hidden'); msg('먼저 API 키를 설정하세요.','err'); return; }
+  await proxyReady;
+  if (!getKey() && !PROXY) { $('#keyCard').classList.remove('hidden'); msg('먼저 API 키를 설정하세요.','err'); return; }
   const r = resolveInput(raw);
   if (r.error!=null){ if(r.error) msg(esc(r.error),'err'); return; }
   if (r.choices){ showChoices(r.choices, `'${raw.trim()}'에 해당하는 종목이 여러 개예요. 골라주세요:`); return; }
